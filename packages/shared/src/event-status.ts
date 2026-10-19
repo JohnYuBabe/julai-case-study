@@ -1,4 +1,4 @@
-import type { EventStatus } from './types.js';
+import type { EventStatus } from './types';
 
 export interface EventStatusInput {
   now: Date;

@@ -4,7 +4,7 @@ import {
   BUTTON_STATE_META,
   resolveButtonState,
   type ButtonView,
-} from '../src/index.js';
+} from '../src/index';
 import {
   CANCELLED_AT,
   DEADLINE,
@@ -14,7 +14,7 @@ import {
   ORGANIZER_ID,
   START,
   VIEWER,
-} from './fixtures.js';
+} from './fixtures';
 
 const resolve = (input: {
   now?: Date;

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { deriveEventStatus } from '../src/index.js';
+import { deriveEventStatus } from '../src/index';
 import {
   CANCELLED_AT,
   DEADLINE,
   END,
   NOW,
   START,
-} from './fixtures.js';
+} from './fixtures';
 
 const at = (now: Date) =>
   deriveEventStatus({

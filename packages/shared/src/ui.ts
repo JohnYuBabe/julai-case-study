@@ -1,4 +1,4 @@
-import type { ButtonState, ButtonStateMeta } from './types.js';
+import type { ButtonState, ButtonStateMeta } from './types';
 
 /**
  * 9 种状态的静态元数据。

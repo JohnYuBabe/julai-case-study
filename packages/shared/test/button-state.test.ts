@@ -4,7 +4,7 @@ import {
   type ButtonEventInput,
   type ButtonView,
   type ButtonViewerInput,
-} from '../src/index.js';
+} from '../src/index';
 import {
   CANCELLED_AT,
   DEADLINE,
@@ -14,7 +14,7 @@ import {
   ORGANIZER_ID,
   START,
   VIEWER,
-} from './fixtures.js';
+} from './fixtures';
 
 function button(
   input: {

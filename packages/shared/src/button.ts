@@ -1,10 +1,10 @@
-import { deriveEventStatus } from './event-status.js';
+import { deriveEventStatus } from './event-status';
 import type {
   ButtonAction,
   ButtonVariant,
   ButtonView,
   RegistrationStatus,
-} from './types.js';
+} from './types';
 
 export interface ButtonEventInput {
   capacity: number;

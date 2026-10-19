@@ -1,4 +1,4 @@
-import type { ButtonEventInput, ButtonViewerInput } from '../src/index.js';
+import type { ButtonEventInput, ButtonViewerInput } from '../src/index';
 
 export const DEADLINE = new Date('2026-11-01T18:00:00.000Z');
 export const START = new Date('2026-11-01T19:00:00.000Z');

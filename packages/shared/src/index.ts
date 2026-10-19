@@ -8,12 +8,12 @@ export {
   type ButtonVariant,
   type EventStatus,
   type RegistrationStatus,
-} from './types.js';
-export { deriveEventStatus, type EventStatusInput } from './event-status.js';
+} from './types';
+export { deriveEventStatus, type EventStatusInput } from './event-status';
 export {
   resolveButtonState,
   type ButtonEventInput,
   type ButtonInput,
   type ButtonViewerInput,
-} from './button.js';
-export { BUTTON_STATE_META } from './ui.js';
+} from './button';
+export { BUTTON_STATE_META } from './ui';
