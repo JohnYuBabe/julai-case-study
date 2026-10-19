@@ -224,7 +224,7 @@ describe('events API（真实 MySQL）', () => {
         .set(as('u-6'));
       expect(detail.body.registration).toEqual({
         status: 'CONFIRMED',
-        waitlistSeq: null,
+        waitlistRank: null,
       });
     });
 
@@ -268,7 +268,7 @@ describe('events API（真实 MySQL）', () => {
       expect(res.body.event.confirmedCount).toBe(1);
       expect(res.body.registration).toEqual({
         status: 'CONFIRMED',
-        waitlistSeq: null,
+        waitlistRank: null,
       });
     });
 
@@ -392,6 +392,33 @@ describe('events API（真实 MySQL）', () => {
       expect(rejoined.body.button.label).toBe('候补中 · 第 2 位');
     });
 
+    it('前面的人退出后，记录里的排位跟着前进，不展示旧票号', async () => {
+      const left = await request(server)
+        .delete('/api/events/ev-full/waitlist')
+        .set(as('u-1'));
+      expect(left.status).toBe(200);
+
+      // u-2 的票号仍是 2，但队列里只剩它一个人，排位必须是 1。
+      const u2 = await request(server)
+        .get('/api/events/ev-full')
+        .set(as('u-2'));
+      expect(u2.body.registration).toEqual({
+        status: 'WAITLISTED',
+        waitlistRank: 1,
+      });
+      expect(u2.body.button.label).toBe('候补中 · 第 1 位');
+
+      const rejoined = await request(server)
+        .post('/api/events/ev-full/waitlist')
+        .set(as('u-1'));
+      expect(rejoined.status).toBe(201);
+      expect(rejoined.body.waitlistSeq).toBe(3);
+      expect(rejoined.body.registration).toEqual({
+        status: 'WAITLISTED',
+        waitlistRank: 2,
+      });
+    });
+
     it('取消报名后最早排队的人自动转正，人数不变', async () => {
       const res = await request(server)
         .delete('/api/events/ev-promo/signup')
@@ -412,7 +439,7 @@ describe('events API（真实 MySQL）', () => {
         .set(as('u-5'));
       expect(promoted.body.registration).toEqual({
         status: 'CONFIRMED',
-        waitlistSeq: null,
+        waitlistRank: null,
       });
       expect(promoted.body.button.state).toBe('SIGNED_UP');
     });

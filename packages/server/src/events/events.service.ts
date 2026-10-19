@@ -93,7 +93,7 @@ export class EventsService {
     return {
       ...this.toSummary(event, now),
       viewer,
-      registration: this.toRegistration(signup),
+      registration: this.toRegistration(signup, waitlist.rank),
       button: this.buttonFor(event, viewer?.id ?? null, signup, now, waitlist),
     };
   }
@@ -292,8 +292,9 @@ export class EventsService {
       }
 
       const updated = await tx.event.findUniqueOrThrow({ where: { id } });
+      // 转正的永远是最早排队的那位，也就是当前排位第 1；票号可能已经很大。
       const message = next
-        ? `已取消报名，候补第 ${next.waitlistSeq ?? '?'} 位已自动转正`
+        ? '已取消报名，候补第 1 位已自动转正'
         : '已取消报名，名额已释放';
 
       const mutation = await this.toMutation(
@@ -453,7 +454,7 @@ export class EventsService {
       event: {
         capacity: event.capacity,
         confirmedCount: event.confirmedCount,
-        waitlistCount: waitlist.activeCount,
+        activeWaitlistCount: waitlist.activeCount,
         signupDeadline: event.signupDeadline,
         startAt: event.startAt,
         endAt: event.endAt,
@@ -492,9 +493,19 @@ export class EventsService {
     };
   }
 
-  private toRegistration(signup: SignupLike | null): RegistrationView | null {
+  /**
+   * `rank` 是当前队列里的实际排位，不是数据库里的票号。票号只用于 FIFO 转正，
+   * 前面有人退出时不会回收，直接展示会让人看到「第 3 位」却只有 2 个人。
+   */
+  private toRegistration(
+    signup: SignupLike | null,
+    rank: number | null,
+  ): RegistrationView | null {
     if (!signup) return null;
-    return { status: signup.status, waitlistSeq: signup.waitlistSeq };
+    return {
+      status: signup.status,
+      waitlistRank: signup.status === 'WAITLISTED' ? rank : null,
+    };
   }
 
   private async toMutation(
@@ -512,7 +523,7 @@ export class EventsService {
       result,
       event: this.toSummary(event, now),
       viewer,
-      registration: this.toRegistration(signup),
+      registration: this.toRegistration(signup, waitlist.rank),
       button: this.buttonFor(event, viewer.id, signup, now, waitlist),
       message,
       waitlistSeq,

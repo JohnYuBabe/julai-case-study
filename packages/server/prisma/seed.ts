@@ -30,6 +30,12 @@ export async function seed(prisma: PrismaClient): Promise<void> {
         id: `u-${i + 1}`,
         name: `队员 ${i + 1}`,
       })),
+      // 状态矩阵专用探针：不出现在 web-demo 的身份切换器里，
+      // 避免其他页面的操作把这些夹具改掉。
+      { id: 'u-probe-member', name: '演示队员' },
+      { id: 'u-probe-signed', name: '演示队员（已报名）' },
+      { id: 'u-probe-confirmed', name: '演示队员（占位）' },
+      { id: 'u-probe-queued', name: '演示队员（候补）' },
     ],
   });
 
@@ -104,8 +110,16 @@ export async function seed(prisma: PrismaClient): Promise<void> {
       },
       {
         ...eventBase,
+        id: 'ev-probe',
+        title: '周末晚篮球 · 满员有候补',
+        capacity: 2,
+        confirmedCount: 2,
+        waitlistCount: 1,
+      },
+      {
+        ...eventBase,
         id: 'ev-promo',
-        title: '候补转正演示 · 只剩 1 个名额',
+        title: '候补转正演示 · 已满员',
         capacity: 1,
         confirmedCount: 1,
         waitlistCount: 1,
@@ -142,6 +156,9 @@ export async function seed(prisma: PrismaClient): Promise<void> {
       signup('ev-cancelled', 'u-3'),
       signup('ev-promo', 'u-4'),
       signup('ev-promo', 'u-5', 'WAITLISTED', 1),
+      signup('ev-probe', 'u-probe-signed'),
+      signup('ev-probe', 'u-probe-confirmed'),
+      signup('ev-probe', 'u-probe-queued', 'WAITLISTED', 1),
     ],
   });
 }

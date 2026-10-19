@@ -25,7 +25,8 @@ export interface EventSummaryView {
 
 export interface RegistrationView {
   status: 'CONFIRMED' | 'WAITLISTED' | 'CANCELLED';
-  waitlistSeq: number | null;
+  /** 仅 WAITLISTED 时非空：当前队列中的实际排位，从 1 开始（不是只增不减的票号）。 */
+  waitlistRank: number | null;
 }
 
 export interface EventListView {
