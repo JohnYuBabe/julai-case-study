@@ -1,0 +1,72 @@
+// 案例的持久化模型。字段名与 SQL 里的 snake_case 一一对应，
+// 事务里的原子 UPDATE 直接写 SQL，避免 ORM 把「读-判断-写」拆成两次往返。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum SignupStatus {
+  CONFIRMED
+  WAITLISTED
+  CANCELLED
+
+  @@map("signup_status")
+}
+
+model User {
+  id        String   @id @db.VarChar(36)
+  name      String   @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  signups   Signup[]
+  organized Event[]  @relation("EventOrganizer")
+
+  @@map("users")
+}
+
+model Event {
+  id              String    @id @db.VarChar(36)
+  title           String    @db.VarChar(120)
+  capacity        Int
+  confirmedCount  Int       @default(0) @map("confirmed_count")
+  waitlistCount   Int       @default(0) @map("waitlist_count")
+  signupDeadline  DateTime  @map("signup_deadline")
+  startAt         DateTime  @map("start_at")
+  endAt           DateTime  @map("end_at")
+  cancelledAt     DateTime? @map("cancelled_at")
+  cancelReason    String?   @map("cancel_reason") @db.VarChar(255)
+  organizerId     String    @map("organizer_id") @db.VarChar(36)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  organizer User     @relation("EventOrganizer", fields: [organizerId], references: [id], onDelete: Restrict)
+  signups   Signup[]
+
+  @@index([startAt])
+  @@map("events")
+}
+
+model Signup {
+  id          String       @id @db.VarChar(36)
+  eventId     String       @map("event_id") @db.VarChar(36)
+  userId      String       @map("user_id") @db.VarChar(36)
+  status      SignupStatus @default(CONFIRMED)
+  waitlistSeq Int?         @map("waitlist_seq")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  // 同一个用户在一个活动上只有一行：取消后保留 CANCELLED，继续挡住重复报名。
+  @@unique([eventId, userId])
+  // 候补序号在活动内唯一；MySQL 允许多个 NULL，所以 CONFIRMED / CANCELLED 不受影响。
+  @@unique([eventId, waitlistSeq])
+  @@index([eventId, status, waitlistSeq])
+  @@map("signups")
+}

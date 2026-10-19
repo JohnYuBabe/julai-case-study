@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc -p packages/shared/tsconfig.json --noEmit"
+    "build": "pnpm --filter @julai/shared build && pnpm --filter @julai/server build",
+    "test": "pnpm --filter @julai/shared test && pnpm --filter @julai/server test",
+    "test:shared": "pnpm --filter @julai/shared test",
+    "test:watch": "pnpm --filter @julai/shared test:watch",
+    "typecheck": "pnpm --filter @julai/shared build && pnpm --filter @julai/shared typecheck && pnpm --filter @julai/server typecheck"
   },
   "devDependencies": {
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.4"
+    "typescript": "5.9.3",
+    "vitest": "2.1.4"
   }
 }
