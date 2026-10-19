@@ -34,9 +34,9 @@ non-recycled ticket number stored for FIFO promotion.
 ## Status
 
 - ✅ `packages/shared` — types, `deriveEventStatus`, `resolveButtonState`, 9-state contract tests.
-- ✅ `packages/server` — NestJS + Prisma + MySQL, signup / waitlist / cancel / auto-promotion, 31 smoke tests.
+- ✅ `packages/server` — NestJS + Prisma + MySQL, signup / waitlist / cancel / auto-promotion, 32 smoke tests.
 - ✅ `tests/concurrency` — 5 scenarios against a real server process and MySQL.
-- ⏳ `packages/web-demo` — Vue 3 + Vite.
+- ✅ `packages/web-demo` — Vue 3 + Vite. Event list, detail page, and a live 9-state matrix that renders whatever the server returns.
 - ⏳ ADRs, deployment.
 
 ## Concurrency evidence
@@ -81,12 +81,40 @@ pnpm --filter @julai/server prisma:deploy
 pnpm --filter @julai/server prisma:seed
 
 # 3. Tests
-pnpm test                                  # 41 shared + 31 server
+pnpm test                                  # 41 shared + 32 server
 pnpm --filter @julai/server build
 pnpm --filter @julai/concurrency start     # rebuilds, then starts the server on :3032
 
 # 4. Run locally
 pnpm --filter @julai/server start          # http://127.0.0.1:3030/api/health
+
+# 5. Web demo (separate terminal; Vite proxies /api to :3030)
+pnpm --filter @julai/web-demo dev          # http://127.0.0.1:5176
+```
+
+The web demo picks an identity from the header (guest, ten members, or the
+organizer) and renders the server's `ButtonView` verbatim. The **9 态矩阵** page
+fetches nine fixed fixtures and shows the actual button next to each contract
+state, so a mismatch is visible rather than hidden.
+
+For a deployment under a subpath, build with the API prefix baked in:
+
+```bash
+VITE_API_BASE=/julai/api pnpm --filter @julai/web-demo build
+```
+
+The prefix must be stripped by the reverse proxy, because Nest serves `/api`,
+not `/julai/api`. With nginx:
+
+```nginx
+location /julai/ {
+  alias /srv/julai/dist/;
+  try_files $uri $uri/ /julai/index.html;
+}
+location /julai/api/ {
+  proxy_pass http://127.0.0.1:3030/api/;   # trailing slash strips /julai
+  proxy_set_header Host $host;
+}
 ```
 
 Identity in the demo is explicit: send `x-demo-user-id: u-1` (or any seeded

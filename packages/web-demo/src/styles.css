@@ -1,0 +1,94 @@
+:root {
+  color-scheme: light;
+
+  --bg: #f6f4ef;
+  --surface: #fffdf8;
+  --surface-muted: #efebe1;
+  --ink: #1c211d;
+  --muted: #555c54;
+  --muted-soft: #666c63;
+  --line: #e4dfd4;
+  --line-strong: #cfc8b8;
+  --accent: #12694f;
+  --accent-strong: #0d553f;
+  --accent-soft: #e5f1ea;
+  --accent-ring: #12694f;
+  --danger: #b4432f;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Segoe UI', sans-serif;
+  --font-serif:
+    'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
+  --font-mono:
+    'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-padding-top: 90px;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(
+      1100px 560px at 8% -12%,
+      rgba(18, 105, 79, 0.07),
+      transparent 62%
+    ),
+    radial-gradient(
+      900px 520px at 100% -6%,
+      rgba(176, 138, 84, 0.08),
+      transparent 58%
+    ),
+    var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(18, 105, 79, 0.18);
+}
+
+button,
+select,
+input {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
