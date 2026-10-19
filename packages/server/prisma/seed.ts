@@ -11,6 +11,10 @@ const DAY = 24 * HOUR;
  * 数据全部是合成的，不含任何真实活动或用户。
  */
 export async function seed(prisma: PrismaClient): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('seed 会清空数据，禁止在 production 环境运行');
+  }
+
   const now = Date.now();
   const at = (offset: number) => new Date(now + offset);
 

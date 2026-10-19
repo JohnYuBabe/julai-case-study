@@ -49,6 +49,20 @@ export class ApiExceptionFilter implements ExceptionFilter {
       return;
     }
 
+    // body-parser 之类在进入 Nest 之前抛出的 4xx（413/415 等）不是
+    // HttpException，不能让它们落进 500 分支。
+    const status = this.statusOf(exception);
+    if (status !== null) {
+      const message =
+        status === HttpStatus.PAYLOAD_TOO_LARGE
+          ? '请求体过大'
+          : status === HttpStatus.UNSUPPORTED_MEDIA_TYPE
+            ? '不支持的 Content-Type'
+            : '请求无效';
+      response.status(status).json(this.body(`HTTP_${status}`, message));
+      return;
+    }
+
     this.logger.error(
       exception instanceof Error ? exception.stack : String(exception),
     );
@@ -59,5 +73,14 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
   private body(code: string, message: string): ErrorBody {
     return { error: { code, message } };
+  }
+
+  private statusOf(exception: unknown): number | null {
+    if (typeof exception !== 'object' || exception === null) return null;
+    const candidate = exception as { status?: unknown; statusCode?: unknown };
+    const value = candidate.status ?? candidate.statusCode;
+    return typeof value === 'number' && value >= 400 && value < 500
+      ? value
+      : null;
   }
 }

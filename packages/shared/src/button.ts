@@ -9,7 +9,10 @@ import type {
 export interface ButtonEventInput {
   capacity: number;
   confirmedCount: number;
-  /** 已经发出的候补序号个数（只增不减）。 */
+  /**
+   * 当前还在队列里的活跃候补人数（不含已退出的人）。
+   * 只用来显示「加入候补（第 N 位）」，不是不可回收的票号。
+   */
   waitlistCount: number;
   signupDeadline: Date;
   startAt: Date;
@@ -22,7 +25,7 @@ export interface ButtonViewerInput {
   /** 未登录传 null。 */
   userId: string | null;
   registrationStatus: RegistrationStatus | null;
-  /** 仅 `registrationStatus === 'WAITLISTED'` 时有值。 */
+  /** 仅 `registrationStatus === 'WAITLISTED'` 时有值：当前排位，从 1 开始。 */
   waitlistSeq: number | null;
 }
 

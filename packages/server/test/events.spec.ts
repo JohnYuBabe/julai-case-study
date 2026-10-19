@@ -38,13 +38,18 @@ describe('events API（真实 MySQL）', () => {
     app.setGlobalPrefix('api');
     app.useGlobalFilters(new ApiExceptionFilter());
     await app.init();
-
     prisma = app.get(PrismaService);
-    await seed(prisma);
     server = app.getHttpServer();
   });
 
+  // 每个用例都从同一份 seed 出发，单独运行 `-t` 也能通过。
+  beforeEach(async () => {
+    await seed(prisma);
+  });
+
+  // 跑完把演示数据恢复原样，方便接着手工看。
   afterAll(async () => {
+    await seed(prisma);
     await app.close();
   });
 
@@ -136,7 +141,7 @@ describe('events API（真实 MySQL）', () => {
       });
     });
 
-    it('满员且未报名看到候补序号', async () => {
+    it('满员且未报名看到候补排位', async () => {
       const res = await request(server)
         .get('/api/events/ev-full')
         .set(as('u-7'));
@@ -183,59 +188,88 @@ describe('events API（真实 MySQL）', () => {
         .set(as('nobody'));
       await expectError(res, 401, 'INVALID_DEMO_USER');
     });
+
+    it('超大请求体返回 413 而不是 500', async () => {
+      const res = await request(server)
+        .post('/api/events/ev-open/signup')
+        .set(as('u-6'))
+        .send({ blob: 'x'.repeat(200_000) });
+      await expectError(res, 413, 'HTTP_413');
+    });
   });
 
   describe('报名与取消', () => {
-    it('报名成功返回 201 并下发「已报名」', async () => {
-      const res = await request(server)
+    it('报名成功后重复报名返回 409，详情页能看到记录', async () => {
+      const created = await request(server)
         .post('/api/events/ev-open/signup')
         .set(as('u-6'));
 
-      expect(res.status).toBe(201);
-      expect(res.body.result).toBe('confirmed');
-      expect(res.body.event.confirmedCount).toBe(1);
-      expect(res.body.event.remaining).toBe(19);
-      expect(res.body.button).toMatchObject({
+      expect(created.status).toBe(201);
+      expect(created.body.result).toBe('confirmed');
+      expect(created.body.event.confirmedCount).toBe(1);
+      expect(created.body.event.remaining).toBe(19);
+      expect(created.body.button).toMatchObject({
         state: 'SIGNED_UP',
         action: 'cancel_signup',
         confirm: true,
       });
-    });
 
-    it('重复报名返回 409', async () => {
-      const res = await request(server)
+      const duplicate = await request(server)
         .post('/api/events/ev-open/signup')
         .set(as('u-6'));
-      await expectError(res, 409, 'ALREADY_SIGNED_UP');
-    });
+      await expectError(duplicate, 409, 'ALREADY_SIGNED_UP');
 
-    it('详情页能看到自己的报名记录', async () => {
-      const res = await request(server)
+      const detail = await request(server)
         .get('/api/events/ev-open')
         .set(as('u-6'));
-      expect(res.body.registration).toEqual({
+      expect(detail.body.registration).toEqual({
         status: 'CONFIRMED',
         waitlistSeq: null,
       });
     });
 
-    it('取消报名释放名额', async () => {
-      const res = await request(server)
+    it('取消报名释放名额，重复取消返回 409', async () => {
+      await request(server)
+        .post('/api/events/ev-open/signup')
+        .set(as('u-6'))
+        .expect(201);
+
+      const cancelled = await request(server)
         .delete('/api/events/ev-open/signup')
         .set(as('u-6'));
 
-      expect(res.status).toBe(200);
-      expect(res.body.result).toBe('cancelled');
-      expect(res.body.promotion).toBeNull();
-      expect(res.body.event.confirmedCount).toBe(0);
-      expect(res.body.button.state).toBe('SIGNUP');
+      expect(cancelled.status).toBe(200);
+      expect(cancelled.body.result).toBe('cancelled');
+      expect(cancelled.body.promotion).toBeNull();
+      expect(cancelled.body.event.confirmedCount).toBe(0);
+      expect(cancelled.body.button.state).toBe('SIGNUP');
+
+      const again = await request(server)
+        .delete('/api/events/ev-open/signup')
+        .set(as('u-6'));
+      await expectError(again, 409, 'NOT_SIGNED_UP');
     });
 
-    it('取消未报名的活动返回 409', async () => {
-      const res = await request(server)
+    it('取消后可以重新报名，计数只加一次', async () => {
+      await request(server)
+        .post('/api/events/ev-open/signup')
+        .set(as('u-6'))
+        .expect(201);
+      await request(server)
         .delete('/api/events/ev-open/signup')
+        .set(as('u-6'))
+        .expect(200);
+
+      const res = await request(server)
+        .post('/api/events/ev-open/signup')
         .set(as('u-6'));
-      await expectError(res, 409, 'NOT_SIGNED_UP');
+
+      expect(res.status).toBe(201);
+      expect(res.body.event.confirmedCount).toBe(1);
+      expect(res.body.registration).toEqual({
+        status: 'CONFIRMED',
+        waitlistSeq: null,
+      });
     });
 
     it('满员时直接报名返回 409', async () => {
@@ -265,10 +299,34 @@ describe('events API（真实 MySQL）', () => {
         .set(as('u-7'));
       await expectError(res, 409, 'SIGNUP_CLOSED');
     });
+
+    it('队长不能报名、候补或取消', async () => {
+      await expectError(
+        await request(server)
+          .post('/api/events/ev-open/signup')
+          .set(as('u-organizer')),
+        409,
+        'ORGANIZER_CANNOT_PARTICIPATE',
+      );
+      await expectError(
+        await request(server)
+          .post('/api/events/ev-full/waitlist')
+          .set(as('u-organizer')),
+        409,
+        'ORGANIZER_CANNOT_PARTICIPATE',
+      );
+      await expectError(
+        await request(server)
+          .delete('/api/events/ev-open/signup')
+          .set(as('u-organizer')),
+        409,
+        'ORGANIZER_CANNOT_PARTICIPATE',
+      );
+    });
   });
 
   describe('候补', () => {
-    it('满员时加入候补拿到下一个序号', async () => {
+    it('满员时加入候补拿到票号与排位，重复加入返回 409', async () => {
       const res = await request(server)
         .post('/api/events/ev-full/waitlist')
         .set(as('u-7'));
@@ -282,13 +340,11 @@ describe('events API（真实 MySQL）', () => {
         label: '候补中 · 第 3 位',
         action: 'leave_waitlist',
       });
-    });
 
-    it('重复加入候补返回 409', async () => {
-      const res = await request(server)
+      const duplicate = await request(server)
         .post('/api/events/ev-full/waitlist')
         .set(as('u-7'));
-      await expectError(res, 409, 'ALREADY_WAITLISTED');
+      await expectError(duplicate, 409, 'ALREADY_WAITLISTED');
     });
 
     it('还有名额时加入候补返回 409', async () => {
@@ -305,26 +361,35 @@ describe('events API（真实 MySQL）', () => {
       await expectError(res, 409, 'ALREADY_SIGNED_UP');
     });
 
-    it('退出候补不回收序号，重排要拿新号', async () => {
-      const leave = await request(server)
+    it('退出候补保留票号，但展示真实排位；重排拿到新票号', async () => {
+      const left = await request(server)
         .delete('/api/events/ev-full/waitlist')
         .set(as('u-2'));
 
-      expect(leave.status).toBe(200);
-      expect(leave.body.result).toBe('left_waitlist');
-      expect(leave.body.event.waitlistCount).toBe(3);
-      expect(leave.body.registration).toEqual({
-        status: 'CANCELLED',
-        waitlistSeq: null,
-      });
+      expect(left.status).toBe(200);
+      expect(left.body.result).toBe('left_waitlist');
+      expect(left.body.event.waitlistCount).toBe(2);
 
-      const detail = await request(server)
+      const u2 = await request(server)
         .get('/api/events/ev-full')
         .set(as('u-2'));
-      expect(detail.body.button).toMatchObject({
+      expect(u2.body.button).toMatchObject({
         state: 'JOIN_WAITLIST',
-        label: '加入候补（第 4 位）',
+        label: '加入候补（第 2 位）',
       });
+
+      const u1 = await request(server)
+        .get('/api/events/ev-full')
+        .set(as('u-1'));
+      expect(u1.body.button.label).toBe('候补中 · 第 1 位');
+
+      const rejoined = await request(server)
+        .post('/api/events/ev-full/waitlist')
+        .set(as('u-2'));
+
+      expect(rejoined.status).toBe(201);
+      expect(rejoined.body.waitlistSeq).toBe(3);
+      expect(rejoined.body.button.label).toBe('候补中 · 第 2 位');
     });
 
     it('取消报名后最早排队的人自动转正，人数不变', async () => {
@@ -334,21 +399,36 @@ describe('events API（真实 MySQL）', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.result).toBe('cancelled');
-      expect(res.body.promotion).toEqual({ userId: 'u-5', waitlistSeq: 1 });
+      expect(res.body.promotion).toEqual({ waitlistSeq: 1 });
       expect(res.body.event.confirmedCount).toBe(1);
       expect(res.body.event.remaining).toBe(0);
-      expect(res.body.button.state).toBe('JOIN_WAITLIST');
-    });
+      expect(res.body.button).toMatchObject({
+        state: 'JOIN_WAITLIST',
+        label: '加入候补（第 1 位）',
+      });
 
-    it('转正后的候补在详情页显示「已报名」', async () => {
-      const res = await request(server)
+      const promoted = await request(server)
         .get('/api/events/ev-promo')
         .set(as('u-5'));
-      expect(res.body.registration).toEqual({
+      expect(promoted.body.registration).toEqual({
         status: 'CONFIRMED',
         waitlistSeq: null,
       });
-      expect(res.body.button.state).toBe('SIGNED_UP');
+      expect(promoted.body.button.state).toBe('SIGNED_UP');
+    });
+
+    it('已取消的活动不能加入候补', async () => {
+      const res = await request(server)
+        .post('/api/events/ev-cancelled/waitlist')
+        .set(as('u-7'));
+      await expectError(res, 409, 'EVENT_CANCELLED');
+    });
+
+    it('比赛开始后不能退出候补', async () => {
+      const res = await request(server)
+        .delete('/api/events/ev-ongoing/waitlist')
+        .set(as('u-1'));
+      await expectError(res, 409, 'SIGNUP_CLOSED');
     });
   });
 });

@@ -46,7 +46,7 @@ export type MutationResult =
   | 'left_waitlist';
 
 export interface PromotionView {
-  userId: string;
+  /** 被自动转正的候补票号；不暴露用户身份。 */
   waitlistSeq: number | null;
 }
 

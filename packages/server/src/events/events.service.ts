@@ -46,7 +46,18 @@ interface LockedEventRow {
   capacity: number;
   confirmed_count: number;
   waitlist_count: number;
+  organizer_id: string;
 }
+
+/** 详情与写操作里用到的候补展示数据。 */
+interface WaitlistSnapshot {
+  /** 当前活跃候补人数。 */
+  activeCount: number;
+  /** 当前用户的实际排位，从 1 开始；不在候补队列时为 null。 */
+  rank: number | null;
+}
+
+type SignupCounter = Pick<Prisma.TransactionClient, 'signup'>;
 
 const iso = (date: Date): string => date.toISOString();
 
@@ -77,18 +88,26 @@ export class EventsService {
           where: { eventId_userId: { eventId: id, userId: viewer.id } },
         })
       : null;
+    const waitlist = await this.waitlistSnapshot(this.prisma, id, signup);
 
     return {
       ...this.toSummary(event, now),
       viewer,
       registration: this.toRegistration(signup),
-      button: this.buttonFor(event, viewer?.id ?? null, signup, now),
+      button: this.buttonFor(event, viewer?.id ?? null, signup, now, waitlist),
     };
   }
 
   /**
-   * 报名：名额判断放在一条条件 UPDATE 里，而不是先 SELECT 再 UPDATE。
-   * 并发下只有抢到名额的请求会让 `confirmed_count + 1` 生效。
+   * 报名。
+   *
+   * 所有写路径都先 `SELECT ... FOR UPDATE` 锁活动行，再读报名行——加锁顺序
+   * 一致（events → signups），既不会死锁，也保证读到的是上一个事务提交后的
+   * 状态。随后仍用条件 UPDATE 占位，数据库层再挡一次超卖。
+   *
+   * 为什么不能只靠 UNIQUE(event_id, user_id)：用户取消后行会保留为 CANCELLED，
+   * 再次报名时 upsert 走的是 update 分支，不会触发唯一冲突；如果不在锁内
+   * 重新判断状态，并发的多个请求会各自 +1，留下没有报名行的幽灵名额。
    */
   async signup(id: string, header?: string): Promise<MutationView> {
     const viewer = await this.requireUser(header);
@@ -96,14 +115,25 @@ export class EventsService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const event = await tx.event.findUnique({ where: { id } });
-        if (!event) throw Errors.eventNotFound();
-        this.assertOpenForSignup(event, now);
+        const locked = await this.lockEvent(tx, id);
+        this.assertNotOrganizer(locked.organizer_id, viewer.id);
+        this.assertOpenForSignup(
+          {
+            cancelledAt: locked.cancelled_at,
+            signupDeadline: locked.signup_deadline,
+            startAt: locked.start_at,
+          },
+          now,
+        );
 
         const existing = await tx.signup.findUnique({
           where: { eventId_userId: { eventId: id, userId: viewer.id } },
         });
         this.assertNotActive(existing);
+
+        if (locked.confirmed_count >= locked.capacity) {
+          throw Errors.seatsExhausted();
+        }
 
         const affected = await tx.$executeRaw`
           UPDATE events
@@ -112,17 +142,9 @@ export class EventsService {
           WHERE id = ${id}
             AND confirmed_count < capacity
             AND cancelled_at IS NULL
-            AND signup_deadline > ${now}
-            AND NOT EXISTS (
-              SELECT 1 FROM signups
-              WHERE event_id = ${id}
-                AND user_id = ${viewer.id}
-                AND status IN ('CONFIRMED', 'WAITLISTED')
-            )`;
+            AND signup_deadline > ${now}`;
 
-        if (affected === 0) {
-          await this.explainFailedSignup(tx, id, viewer.id, now);
-        }
+        if (affected === 0) throw Errors.seatsExhausted();
 
         const saved = await tx.signup.upsert({
           where: { eventId_userId: { eventId: id, userId: viewer.id } },
@@ -136,7 +158,8 @@ export class EventsService {
         });
 
         const updated = await tx.event.findUniqueOrThrow({ where: { id } });
-        return this.toMutation(
+        return await this.toMutation(
+          tx,
           'confirmed',
           updated,
           viewer,
@@ -146,7 +169,6 @@ export class EventsService {
         );
       });
     } catch (error) {
-      // 同一用户的并发报名：后插入的一方撞唯一约束，整个事务（含 +1）回滚。
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
@@ -159,7 +181,8 @@ export class EventsService {
 
   /**
    * 加入候补：先锁活动行，再发放序号。
-   * 候补序号来自 `waitlist_count`，只增不减，退出后重排会拿到更大的号。
+   * 数据库里的 `waitlist_count` 是只增不减的票号；界面展示的「第 N 位」
+   * 由当前活跃候补人数算出，退出者不会把别人的排位永久推高。
    */
   async joinWaitlist(id: string, header?: string): Promise<MutationView> {
     const viewer = await this.requireUser(header);
@@ -168,10 +191,15 @@ export class EventsService {
     try {
       return await this.prisma.$transaction(async (tx) => {
         const locked = await this.lockEvent(tx, id);
-        this.assertNotCancelled({ cancelledAt: locked.cancelled_at });
-        if (now >= locked.start_at || now >= locked.signup_deadline) {
-          throw Errors.signupClosed();
-        }
+        this.assertNotOrganizer(locked.organizer_id, viewer.id);
+        this.assertOpenForSignup(
+          {
+            cancelledAt: locked.cancelled_at,
+            signupDeadline: locked.signup_deadline,
+            startAt: locked.start_at,
+          },
+          now,
+        );
 
         const existing = await tx.signup.findUnique({
           where: { eventId_userId: { eventId: id, userId: viewer.id } },
@@ -200,13 +228,14 @@ export class EventsService {
         });
 
         const updated = await tx.event.findUniqueOrThrow({ where: { id } });
-        return this.toMutation(
+        return await this.toMutation(
+          tx,
           'waitlisted',
           updated,
           viewer,
           saved,
           now,
-          `已加入候补，当前第 ${seq} 位`,
+          '已加入候补',
           seq,
         );
       });
@@ -231,6 +260,7 @@ export class EventsService {
 
     return this.prisma.$transaction(async (tx) => {
       const locked = await this.lockEvent(tx, id);
+      this.assertNotOrganizer(locked.organizer_id, viewer.id);
       this.assertNotCancelled({ cancelledAt: locked.cancelled_at });
       if (now >= locked.start_at) throw Errors.signupClosed();
 
@@ -266,29 +296,31 @@ export class EventsService {
         ? `已取消报名，候补第 ${next.waitlistSeq ?? '?'} 位已自动转正`
         : '已取消报名，名额已释放';
 
+      const mutation = await this.toMutation(
+        tx,
+        'cancelled',
+        updated,
+        viewer,
+        saved,
+        now,
+        message,
+      );
+
       return {
-        ...this.toMutation(
-          'cancelled',
-          updated,
-          viewer,
-          saved,
-          now,
-          message,
-        ),
-        promotion: next
-          ? { userId: next.userId, waitlistSeq: next.waitlistSeq }
-          : null,
+        ...mutation,
+        promotion: next ? { waitlistSeq: next.waitlistSeq } : null,
       };
     });
   }
 
-  /** 退出候补：只改报名行，不回退 `waitlist_count`。 */
+  /** 退出候补：只改报名行，不回退票号计数。 */
   async leaveWaitlist(id: string, header?: string): Promise<MutationView> {
     const viewer = await this.requireUser(header);
     const now = new Date();
 
     return this.prisma.$transaction(async (tx) => {
       const locked = await this.lockEvent(tx, id);
+      this.assertNotOrganizer(locked.organizer_id, viewer.id);
       this.assertNotCancelled({ cancelledAt: locked.cancelled_at });
       if (now >= locked.start_at) throw Errors.signupClosed();
 
@@ -303,7 +335,8 @@ export class EventsService {
       });
 
       const updated = await tx.event.findUniqueOrThrow({ where: { id } });
-      return this.toMutation(
+      return await this.toMutation(
+        tx,
         'left_waitlist',
         updated,
         viewer,
@@ -342,7 +375,7 @@ export class EventsService {
     return tx
       .$queryRaw<LockedEventRow[]>`
         SELECT id, cancelled_at, signup_deadline, start_at, capacity,
-               confirmed_count, waitlist_count
+               confirmed_count, waitlist_count, organizer_id
         FROM events
         WHERE id = ${id}
         FOR UPDATE`
@@ -353,26 +386,31 @@ export class EventsService {
       });
   }
 
-  /** 条件 UPDATE 没生效时，把「为什么没生效」翻译成具体错误码。 */
-  private async explainFailedSignup(
-    tx: Prisma.TransactionClient,
-    id: string,
-    userId: string,
-    now: Date,
-  ): Promise<never> {
-    const fresh = await tx.event.findUnique({ where: { id } });
-    if (!fresh) throw Errors.eventNotFound();
-    this.assertNotCancelled(fresh);
-    if (now >= fresh.startAt || now >= fresh.signupDeadline) {
-      throw Errors.signupClosed();
+  private async waitlistSnapshot(
+    client: SignupCounter,
+    eventId: string,
+    signup: SignupLike | null,
+  ): Promise<WaitlistSnapshot> {
+    const activeCount = await client.signup.count({
+      where: { eventId, status: 'WAITLISTED' },
+    });
+
+    if (signup?.status !== 'WAITLISTED' || signup.waitlistSeq === null) {
+      return { activeCount, rank: null };
     }
 
-    const current = await tx.signup.findUnique({
-      where: { eventId_userId: { eventId: id, userId } },
+    const rank = await client.signup.count({
+      where: {
+        eventId,
+        status: 'WAITLISTED',
+        waitlistSeq: { lte: signup.waitlistSeq },
+      },
     });
-    this.assertNotActive(current);
+    return { activeCount, rank };
+  }
 
-    throw Errors.seatsExhausted();
+  private assertNotOrganizer(organizerId: string, userId: string): void {
+    if (organizerId === userId) throw Errors.organizerCannotParticipate();
   }
 
   private assertNotCancelled(event: { cancelledAt: Date | null }): void {
@@ -380,7 +418,11 @@ export class EventsService {
   }
 
   private assertOpenForSignup(
-    event: { cancelledAt: Date | null; signupDeadline: Date; startAt: Date },
+    event: {
+      cancelledAt: Date | null;
+      signupDeadline: Date;
+      startAt: Date;
+    },
     now: Date,
   ): void {
     this.assertNotCancelled(event);
@@ -399,6 +441,7 @@ export class EventsService {
     viewerId: string | null,
     signup: SignupLike | null,
     now: Date,
+    waitlist: WaitlistSnapshot,
   ): ButtonView {
     const registrationStatus =
       signup?.status === 'CONFIRMED' || signup?.status === 'WAITLISTED'
@@ -410,7 +453,7 @@ export class EventsService {
       event: {
         capacity: event.capacity,
         confirmedCount: event.confirmedCount,
-        waitlistCount: event.waitlistCount,
+        waitlistCount: waitlist.activeCount,
         signupDeadline: event.signupDeadline,
         startAt: event.startAt,
         endAt: event.endAt,
@@ -420,7 +463,7 @@ export class EventsService {
       viewer: {
         userId: viewerId,
         registrationStatus,
-        waitlistSeq: signup?.waitlistSeq ?? null,
+        waitlistSeq: waitlist.rank,
       },
     });
   }
@@ -454,7 +497,8 @@ export class EventsService {
     return { status: signup.status, waitlistSeq: signup.waitlistSeq };
   }
 
-  private toMutation(
+  private async toMutation(
+    client: SignupCounter,
     result: MutationView['result'],
     event: EventLike,
     viewer: ViewerView,
@@ -462,13 +506,14 @@ export class EventsService {
     now: Date,
     message: string,
     waitlistSeq: number | null = null,
-  ): MutationView {
+  ): Promise<MutationView> {
+    const waitlist = await this.waitlistSnapshot(client, event.id, signup);
     return {
       result,
       event: this.toSummary(event, now),
       viewer,
       registration: this.toRegistration(signup),
-      button: this.buttonFor(event, viewer.id, signup, now),
+      button: this.buttonFor(event, viewer.id, signup, now, waitlist),
       message,
       waitlistSeq,
       promotion: null,

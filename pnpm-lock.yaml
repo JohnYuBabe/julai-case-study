@@ -87,6 +87,25 @@ importers:
 
   packages/shared: {}
 
+  tests/concurrency:
+    dependencies:
+      '@prisma/client':
+        specifier: 6.19.3
+        version: 6.19.3(prisma@6.19.3)(typescript@5.9.3)
+      dotenv:
+        specifier: 16.4.7
+        version: 16.4.7
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.5
+        version: 22.20.5
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
 packages:
 
   /@angular-devkit/core@19.2.24(chokidar@4.0.3):

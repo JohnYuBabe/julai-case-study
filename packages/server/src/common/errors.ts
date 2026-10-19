@@ -36,6 +36,12 @@ export const Errors = {
     fail('SEATS_EXHAUSTED', '名额已满，可以加入候补', HttpStatus.CONFLICT),
   seatsAvailable: () =>
     fail('SEATS_AVAILABLE', '还有名额，直接报名即可', HttpStatus.CONFLICT),
+  organizerCannotParticipate: () =>
+    fail(
+      'ORGANIZER_CANNOT_PARTICIPATE',
+      '队长不参与报名，请在管理页操作',
+      HttpStatus.CONFLICT,
+    ),
   alreadySignedUp: () =>
     fail('ALREADY_SIGNED_UP', '你已经报名了这个活动', HttpStatus.CONFLICT),
   alreadyWaitlisted: () =>

@@ -15,8 +15,11 @@ async function bootstrap(): Promise<void> {
   });
 
   const port = Number(process.env.PORT ?? 3030);
-  await app.listen(port);
-  console.log(`julai-case-server listening on http://127.0.0.1:${port}/api`);
+  // 默认只监听本机：演示身份是请求头，不应该一启动就暴露到局域网。
+  // 部署时显式设置 HOST=0.0.0.0。
+  const host = process.env.HOST ?? '127.0.0.1';
+  await app.listen(port, host);
+  console.log(`julai-case-server listening on http://${host}:${port}/api`);
 }
 
 void bootstrap();
