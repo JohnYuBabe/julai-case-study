@@ -81,6 +81,7 @@ describe('9 态契约', () => {
     for (const [, view] of SAMPLES) {
       if (view.variant === 'disabled') {
         expect(view.action).toBeNull();
+        expect(view.reason?.length ?? 0).toBeGreaterThan(0);
       } else {
         expect(view.action).not.toBeNull();
       }

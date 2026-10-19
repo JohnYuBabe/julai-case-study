@@ -83,7 +83,7 @@ describe('9 种按钮状态各自可达', () => {
 
   it('7 JOIN_WAITLIST：已满，显示下一位', () => {
     const view = button({
-      event: { confirmedCount: 20, waitlistCount: 3 },
+      event: { confirmedCount: 20, activeWaitlistCount: 3 },
     });
     expect(view.state).toBe('JOIN_WAITLIST');
     expect(view.label).toBe('加入候补（第 4 位）');

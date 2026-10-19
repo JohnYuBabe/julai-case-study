@@ -11,7 +11,7 @@ export const ORGANIZER_ID = 'u-organizer';
 export const EVENT: ButtonEventInput = {
   capacity: 20,
   confirmedCount: 10,
-  waitlistCount: 0,
+  activeWaitlistCount: 0,
   signupDeadline: DEADLINE,
   startAt: START,
   endAt: END,

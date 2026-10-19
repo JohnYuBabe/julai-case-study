@@ -13,7 +13,7 @@ export interface ButtonEventInput {
    * 当前还在队列里的活跃候补人数（不含已退出的人）。
    * 只用来显示「加入候补（第 N 位）」，不是不可回收的票号。
    */
-  waitlistCount: number;
+  activeWaitlistCount: number;
   signupDeadline: Date;
   startAt: Date;
   endAt: Date;
@@ -44,6 +44,7 @@ const view = (
   variant: ButtonVariant,
   action: ButtonAction,
   requireAuth = false,
+  reason?: string,
 ): ButtonView => ({
   state,
   label,
@@ -51,6 +52,7 @@ const view = (
   action,
   requireAuth,
   confirm: false,
+  ...(reason ? { reason } : {}),
 });
 
 /**
@@ -83,11 +85,11 @@ export function resolveButtonState(input: ButtonInput): ButtonView {
   });
 
   if (status === 'CANCELLED') {
-    return view('CANCELLED', '活动已取消', 'disabled', null);
+    return view('CANCELLED', '活动已取消', 'disabled', null, false, '活动已取消，无法报名。');
   }
 
   if (status === 'FINISHED') {
-    return view('FINISHED', '活动已结束', 'disabled', null);
+    return view('FINISHED', '活动已结束', 'disabled', null, false, '活动已结束，报名与候补都已关闭。');
   }
 
   if (viewer.userId !== null && viewer.userId === event.organizerId) {
@@ -107,7 +109,7 @@ export function resolveButtonState(input: ButtonInput): ButtonView {
         confirmText: '取消后名额会释放给候补的人，确定吗？',
       };
     }
-    return view('SIGNED_UP', '已报名', 'disabled', null);
+    return view('SIGNED_UP', '已报名', 'disabled', null, false, '比赛已开始，无法取消报名。');
   }
 
   if (registration === 'WAITLISTED') {
@@ -120,21 +122,21 @@ export function resolveButtonState(input: ButtonInput): ButtonView {
         confirmText: '退出后就排到队尾了，确定吗？',
       };
     }
-    return view('WAITLISTED', '候补中', 'disabled', null);
+    return view('WAITLISTED', '候补中', 'disabled', null, false, '比赛已开始，无法退出候补。');
   }
 
   if (now >= event.startAt.getTime()) {
-    return view('CLOSED', '比赛已开始', 'disabled', null);
+    return view('CLOSED', '比赛已开始', 'disabled', null, false, '比赛已开始，报名已关闭。');
   }
 
   if (now >= event.signupDeadline.getTime()) {
-    return view('CLOSED', '报名已截止', 'disabled', null);
+    return view('CLOSED', '报名已截止', 'disabled', null, false, '报名已截止，无法再报名。');
   }
 
   if (event.confirmedCount >= event.capacity) {
     return view(
       'JOIN_WAITLIST',
-      `加入候补（第 ${event.waitlistCount + 1} 位）`,
+      `加入候补（第 ${event.activeWaitlistCount + 1} 位）`,
       'primary',
       'join_waitlist',
       viewer.userId === null,

@@ -34,7 +34,7 @@ export const EVENT_STATUSES = [
 
 export type EventStatus = (typeof EVENT_STATUSES)[number];
 
-/** 报名记录的状态。`CANCELLED` 行保留，用来让唯一约束继续拦住重复报名。 */
+/** 参与按钮判定的报名状态。数据库里的 `CANCELLED` 行仍保留，服务端会把它映射为 null。 */
 export type RegistrationStatus = 'CONFIRMED' | 'WAITLISTED';
 
 export type ButtonVariant = 'primary' | 'ghost' | 'disabled';
@@ -59,6 +59,8 @@ export interface ButtonView {
   /** 点击前是否需要二次确认。 */
   confirm: boolean;
   confirmText?: string;
+  /** 置灰时给用户的原因；文案由服务端决定，前端不按 state 再推导一次。 */
+  reason?: string;
 }
 
 /** 每种状态的静态说明，用于文档、测试与前端兜底文案。 */
