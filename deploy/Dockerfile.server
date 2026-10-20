@@ -1,0 +1,40 @@
+# 生产镜像：只装 server + shared，前端由宿主 nginx 直接托管。
+# 构建上下文是仓库根目录：docker build -f deploy/Dockerfile.server .
+FROM node:22-alpine AS base
+RUN corepack enable && corepack prepare pnpm@8.6.12 --activate
+WORKDIR /app
+
+# 先装依赖，缓存层不随源码变化。
+# postinstall 会执行 prisma generate，所以 schema 必须在 install 之前就位。
+FROM base AS deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/server/package.json packages/server/package.json
+COPY packages/server/prisma packages/server/prisma
+RUN pnpm install --frozen-lockfile --filter @julai/server...
+
+FROM deps AS build
+COPY tsconfig.base.json ./
+COPY packages/shared ./packages/shared
+COPY packages/server ./packages/server
+RUN pnpm --filter @julai/server build
+
+FROM node:22-alpine AS runtime
+RUN apk add --no-cache openssl libc6-compat
+ENV NODE_ENV=production
+WORKDIR /app
+
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/packages/server/node_modules ./packages/server/node_modules
+COPY --from=build --chown=node:node /app/packages/shared ./packages/shared
+COPY --from=build --chown=node:node /app/packages/server/package.json ./packages/server/package.json
+COPY --from=build --chown=node:node /app/packages/server/dist ./packages/server/dist
+COPY --from=build --chown=node:node /app/packages/server/prisma ./packages/server/prisma
+COPY --chown=node:node deploy/docker-entrypoint.sh ./deploy/docker-entrypoint.sh
+RUN chmod +x ./deploy/docker-entrypoint.sh
+
+USER node
+WORKDIR /app/packages/server
+EXPOSE 3030
+
+CMD ["/app/deploy/docker-entrypoint.sh"]

@@ -123,9 +123,11 @@ export async function seed(prisma: PrismaClient): Promise<void> {
         capacity: 1,
         confirmedCount: 1,
         waitlistCount: 1,
-        signupDeadline: at(6 * HOUR),
-        startAt: at(1 * DAY),
-        endAt: at(1 * DAY + 2 * HOUR),
+        // 演示站每 6 小时重置一次；这里留 2 天余量，重置偶发失败也不会让
+        // 「取消报名 → 候补转正」在半天内就变成「报名已截止」。
+        signupDeadline: at(2 * DAY),
+        startAt: at(3 * DAY),
+        endAt: at(3 * DAY + 2 * HOUR),
       },
     ],
   });

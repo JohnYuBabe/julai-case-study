@@ -68,7 +68,10 @@ export class ApiError extends Error {
 }
 
 const configured = import.meta.env.VITE_API_BASE;
-const API_BASE = (configured && configured.length > 0 ? configured : '/api').replace(
+// 生产构建默认按子路径 /julai/api 发布；开发用 Vite 的 /api 代理。
+// 这样直接跑 pnpm build 也不会把 /api 打进线上 bundle（VITE_API_BASE 仍可覆盖）。
+const fallback = import.meta.env.PROD ? '/julai/api' : '/api';
+const API_BASE = (configured && configured.length > 0 ? configured : fallback).replace(
   /\/+$/,
   '',
 );

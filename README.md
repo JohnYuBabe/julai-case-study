@@ -4,6 +4,8 @@ A runnable slice of three engineering decisions from a real product: oversell pr
 
 > **This is a case study, not the full product.** All data is synthetic.
 
+**Live demo:** <https://johnyu.wancafu.com/julai/> — synthetic data, reset every 6 hours. Demo identity is a request header, so anyone can write; that is deliberate.
+
 ## Three decisions
 
 1. **No oversell**: every write path first takes `SELECT ... FOR UPDATE` on the event row, then increments with a conditional `UPDATE ... WHERE confirmed_count < capacity`. A unique constraint backs duplicate signups. No Redis pre-allocation, no unlocked read-then-write.
@@ -37,7 +39,8 @@ non-recycled ticket number stored for FIFO promotion.
 - ✅ `packages/server` — NestJS + Prisma + MySQL, signup / waitlist / cancel / auto-promotion, 32 smoke tests.
 - ✅ `tests/concurrency` — 5 scenarios against a real server process and MySQL.
 - ✅ `packages/web-demo` — Vue 3 + Vite. Event list, detail page, and a live 9-state matrix that renders whatever the server returns.
-- ⏳ ADRs, deployment.
+- ✅ ADRs — three decision records under [`docs/decisions`](./docs/decisions).
+- ✅ Deployment — Docker Compose + MySQL 8 + nginx subpath, live at <https://johnyu.wancafu.com/julai/>. See [`deploy/README.md`](./deploy/README.md).
 
 ## Concurrency evidence
 
@@ -97,25 +100,22 @@ organizer) and renders the server's `ButtonView` verbatim. The **9 态矩阵** p
 fetches nine fixed fixtures and shows the actual button next to each contract
 state, so a mismatch is visible rather than hidden.
 
-For a deployment under a subpath, build with the API prefix baked in:
+For a deployment under a subpath, build with the API prefix baked in. Production builds already default to `/julai/api`, and `build:demo` pins it explicitly:
 
 ```bash
-VITE_API_BASE=/julai/api pnpm --filter @julai/web-demo build
+pnpm build:demo   # VITE_API_BASE=/julai/api pnpm --filter @julai/web-demo build
 ```
 
 The prefix must be stripped by the reverse proxy, because Nest serves `/api`,
-not `/julai/api`. With nginx:
+not `/julai/api`. The live setup uses:
 
-```nginx
-location /julai/ {
-  alias /srv/julai/dist/;
-  try_files $uri $uri/ /julai/index.html;
-}
-location /julai/api/ {
-  proxy_pass http://127.0.0.1:3030/api/;   # trailing slash strips /julai
-  proxy_set_header Host $host;
-}
-```
+- `location ^~ /julai/api/` → `proxy_pass http://127.0.0.1:3030/api/;`
+- `location /julai/` → static root `/var/www/julai`, SPA fallback to `/julai/index.html`
+- `location = /julai/healthz` → `/api/health`, plus per-IP `limit_req` / `limit_conn` and a 16k body cap on the public API
+
+Full files: [`deploy/nginx-locations.conf`](./deploy/nginx-locations.conf) and
+[`deploy/docker-compose.yml`](./deploy/docker-compose.yml). A sidecar reseeds
+the demo every 6 hours, because every seed timestamp is relative to seed time.
 
 Identity in the demo is explicit: send `x-demo-user-id: u-1` (or any seeded
 user). A real product would read this from the session. The demo server binds

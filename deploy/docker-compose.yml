@@ -1,0 +1,124 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: julai-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-julai_case}
+      MYSQL_USER: ${MYSQL_USER:-julai}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      TZ: UTC
+    # 只绑回环：宿主机工具可连 127.0.0.1:3311，公网连不到
+    ports:
+      - "127.0.0.1:3311:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    # 2GB 小机器：收紧 buffer pool，和 console / rbac 的实例共存
+    command:
+      - --innodb-buffer-pool-size=96M
+      - --performance-schema=OFF
+      - --max-connections=40
+      - --table-open-cache=64
+    mem_limit: 384m
+    shm_size: 64mb
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysql -h 127.0.0.1 -uroot -e 'SELECT 1' >/dev/null 2>&1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    logging: *default-logging
+
+  server:
+    image: julai-server:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    container_name: julai-server
+    restart: on-failure:5
+    stop_grace_period: 30s
+    environment:
+      NODE_ENV: production
+      PORT: 3030
+      HOST: 0.0.0.0
+      DATABASE_URL: mysql://${MYSQL_USER:-julai}:${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}@mysql:3306/${MYSQL_DATABASE:-julai_case}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://johnyu.wancafu.com}
+      # 演示站：重启后重置为确定性种子数据。要保留线上改动时改成 false。
+      SEED_ON_START: ${SEED_ON_START:-true}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    # 只绑回环；对外由宿主 nginx 反向代理
+    ports:
+      - "127.0.0.1:3030:3030"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:3030/api/health || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging: *default-logging
+
+  # 演示数据会随时间失效（报名截止、开赛），公开写接口也会改掉种子状态。
+  # 这个容器每 6 小时重跑一次 seed，让站点自己回到可演示状态。
+  # 与 server 共用镜像，不额外占一份磁盘；空闲时只占十几 MB 内存。
+  resetter:
+    image: julai-server:local
+    container_name: julai-resetter
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    working_dir: /app/packages/server
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://${MYSQL_USER:-julai}:${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}@mysql:3306/${MYSQL_DATABASE:-julai_case}
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          sleep 21600
+          echo "[resetter] reseeding demo data"
+          NODE_ENV=development ./node_modules/.bin/tsx prisma/seed.ts || echo "[resetter] seed failed, will retry next cycle"
+        done
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    pids_limit: 64
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    logging: *default-logging
+
+volumes:
+  mysql-data:
