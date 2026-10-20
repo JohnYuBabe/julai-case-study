@@ -6,6 +6,8 @@ A runnable slice of three engineering decisions from a real product: oversell pr
 
 **Live demo:** <https://johnyu.wancafu.com/julai/> — synthetic data, reset every 6 hours. Demo identity is a request header, so anyone can write; that is deliberate.
 
+![30 秒演示：19/20 报名后满员、切换身份进入候补、并发测试真实输出、9 态矩阵](docs/demo.gif)
+
 ## Three decisions
 
 1. **No oversell**: every write path first takes `SELECT ... FOR UPDATE` on the event row, then increments with a conditional `UPDATE ... WHERE confirmed_count < capacity`. A unique constraint backs duplicate signups. No Redis pre-allocation, no unlocked read-then-write.

@@ -30,6 +30,12 @@ export async function seed(prisma: PrismaClient): Promise<void> {
         id: `u-${i + 1}`,
         name: `队员 ${i + 1}`,
       })),
+      // 「最后 1 个名额」活动占位：只用来把容量填到 19/20，
+      // 不在身份切换器里，避免录制演示时被误操作。
+      ...Array.from({ length: 19 }, (_, i) => ({
+        id: `u-seat-${String(i + 1).padStart(2, '0')}`,
+        name: `占位队员 ${i + 1}`,
+      })),
       // 状态矩阵专用探针：不出现在 web-demo 的身份切换器里，
       // 避免其他页面的操作把这些夹具改掉。
       { id: 'u-probe-member', name: '演示队员' },
@@ -57,6 +63,18 @@ export async function seed(prisma: PrismaClient): Promise<void> {
         id: 'ev-open',
         title: '周五晚篮球 · 开放报名',
         capacity: 20,
+      },
+      {
+        // 30 秒演示的开场：19/20，按钮显示「立即报名」，报名后立刻满员。
+        // 开赛时间放在两小时后，保证在列表里靠前，且始终处于可报名阶段。
+        ...eventBase,
+        id: 'ev-last-seat',
+        title: '今晚开赛 · 最后 1 个名额',
+        capacity: 20,
+        confirmedCount: 19,
+        signupDeadline: at(1 * HOUR),
+        startAt: at(2 * HOUR),
+        endAt: at(4 * HOUR),
       },
       {
         ...eventBase,
@@ -147,8 +165,10 @@ export async function seed(prisma: PrismaClient): Promise<void> {
 
   await prisma.signup.createMany({
     data: [
-      signup('ev-full', 'u-3'),
-      signup('ev-full', 'u-4'),
+      ...Array.from({ length: 19 }, (_, i) =>
+        signup('ev-last-seat', `u-seat-${String(i + 1).padStart(2, '0')}`),
+      ),
+      signup('ev-full', 'u-3'),      signup('ev-full', 'u-4'),
       signup('ev-full', 'u-5'),
       signup('ev-full', 'u-1', 'WAITLISTED', 1),
       signup('ev-full', 'u-2', 'WAITLISTED', 2),
