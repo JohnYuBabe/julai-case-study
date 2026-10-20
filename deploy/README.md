@@ -43,6 +43,11 @@ curl -fsS -o /dev/null -w '%{http_code}\n' https://johnyu.wancafu.com/julai/
 curl -fsS -o /dev/null -w '%{http_code}\n' https://johnyu.wancafu.com/julai/.env   # 期望 404
 ```
 
+> 宝塔面板在保存站点设置、切换 SSL 等操作时可能重写 vhost，把手工合并的
+> `/julai` 片段冲掉。改完面板设置后重新检查线上 200 与 `nginx -t`；vhost 的
+> 备份文件名为 `*.bak.julai-<时间戳>`。本次上线用的是
+> `/tmp/julai-nginx-patch.py`（一次性脚本，未入库）。
+
 ## 为什么每 6 小时重置
 
 种子数据的时间全部相对于 seed 时刻生成：报名截止、开赛、结束都是偏移量。
