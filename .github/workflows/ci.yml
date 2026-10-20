@@ -1,0 +1,276 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.13.0'
+  # pnpm-lock.yaml 的 lockfileVersion 是 6.0，由 pnpm 8 生成；
+  # pnpm 9 会判定锁文件不兼容，所以这里锁死 8.6.12。
+  PNPM_VERSION: '8.6.12'
+  # CI 专用的一次性库，不指向任何真实环境。
+  DATABASE_URL: 'mysql://root:root@127.0.0.1:3306/julai_case'
+
+jobs:
+  typecheck:
+    name: Typecheck (shared, server, web-demo, concurrency)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # packages/server 的 postinstall 会跑 prisma generate，jest 的
+      # setupFiles: dotenv/config 也会从 packages/server/.env 读配置，
+      # 所以在 pnpm install 之前就把这个被 gitignore 的文件写出来。
+      - name: Write packages/server/.env
+        run: |
+          cat > packages/server/.env <<EOF
+          DATABASE_URL="$DATABASE_URL"
+          PORT=3030
+          HOST=127.0.0.1
+          EOF
+
+      # setup-node 的 pnpm 缓存需要调用 pnpm store path，
+      # 因此 pnpm/action-setup 必须排在 setup-node 前面。
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 根 typecheck 会先 build @julai/shared，再依次 typecheck
+      # shared / server / web-demo。
+      - name: Typecheck workspace (builds @julai/shared first)
+        run: pnpm typecheck
+
+      # 根 typecheck 脚本没有包含 tests/concurrency，单独补一条：
+      # 并发套件由 tsx 执行，tsx 只剥类型不做检查，漏了这条它永远不会红。
+      - name: Typecheck concurrency suite
+        run: pnpm --filter @julai/concurrency typecheck
+
+  test-shared:
+    name: "Unit tests: shared (vitest)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write packages/server/.env
+        run: |
+          cat > packages/server/.env <<EOF
+          DATABASE_URL="$DATABASE_URL"
+          PORT=3030
+          HOST=127.0.0.1
+          EOF
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 测试直接 import ../src，不依赖 shared 的 dist。
+      - name: Run shared tests
+        run: pnpm --filter @julai/shared test
+
+  test-server:
+    name: "Unit tests: server (jest, real MySQL 8.0)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_DATABASE: julai_case
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=36
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write packages/server/.env
+        run: |
+          cat > packages/server/.env <<EOF
+          DATABASE_URL="$DATABASE_URL"
+          PORT=3030
+          HOST=127.0.0.1
+          EOF
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 正常路径由 packages/server 的 postinstall 生成 client；
+      # 这里显式再来一次，避免 postinstall 被跳过时以「一堆类型错误」的形式失败。
+      - name: Ensure Prisma client is generated
+        run: pnpm --filter @julai/server prisma:generate
+
+      # pnpm 8 不会自动触发包内的 pretest，所以 server 运行时依赖的
+      # @julai/shared/dist 必须在测试前显式构建。
+      - name: Build shared package
+        run: pnpm --filter @julai/shared build
+
+      # service 的 healthcheck 已经会让 job 等 MySQL 就绪；
+      # 这里再做一次 TCP 探测，避免 healthcheck 与端口映射之间的竞态。
+      - name: Wait for MySQL on 127.0.0.1:3306
+        run: |
+          for attempt in $(seq 1 60); do
+            if (exec 3<>/dev/tcp/127.0.0.1/3306) 2>/dev/null; then
+              echo "MySQL accepted a connection on attempt ${attempt}."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::MySQL did not accept connections on 127.0.0.1:3306 within 120s."
+          exit 1
+
+      # pnpm 8 不会自动执行包内 pretest，迁移必须在这里显式完成；
+      # 单独成步也能让迁移失败和测试失败分开标红。
+      - name: Apply Prisma migrations
+        working-directory: packages/server
+        run: pnpm prisma:deploy
+
+      - name: Run server tests
+        run: pnpm --filter @julai/server test
+
+  build-web:
+    name: "Build: web-demo (vue-tsc + vite)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write packages/server/.env
+        run: |
+          cat > packages/server/.env <<EOF
+          DATABASE_URL="$DATABASE_URL"
+          PORT=3030
+          HOST=127.0.0.1
+          EOF
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 这个脚本内部会先 build @julai/shared，再 vue-tsc --noEmit && vite build。
+      # api.ts 在 PROD 下的 fallback 已经是 /julai/api，产物与 build:demo 等价。
+      - name: Build web demo
+        run: pnpm --filter @julai/web-demo build
+
+  test-concurrency:
+    name: "Concurrency: 50 signups for 20 seats (real MySQL)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_DATABASE: julai_case
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=36
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write packages/server/.env
+        run: |
+          cat > packages/server/.env <<EOF
+          DATABASE_URL="$DATABASE_URL"
+          PORT=3030
+          HOST=127.0.0.1
+          EOF
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Ensure Prisma client is generated
+        run: pnpm --filter @julai/server prisma:generate
+
+      - name: Wait for MySQL on 127.0.0.1:3306
+        run: |
+          for attempt in $(seq 1 60); do
+            if (exec 3<>/dev/tcp/127.0.0.1/3306) 2>/dev/null; then
+              echo "MySQL accepted a connection on attempt ${attempt}."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::MySQL did not accept connections on 127.0.0.1:3306 within 120s."
+          exit 1
+
+      # 并发套件自己会 execFileSync 重建 server（避免对着上一次的 dist 跑出假绿）。
+      # 这里先独立 build 一次，让编译失败显示为 "Build server"，
+      # 而不是淹没在并发场景的输出里。
+      - name: Build server
+        run: pnpm --filter @julai/server build
+
+      - name: Apply Prisma migrations
+        working-directory: packages/server
+        run: pnpm prisma:deploy
+
+      # 真实跑 5 个场景，断言写在 tests/concurrency/src/run.ts 里；
+      # 失败会以非零退出码结束，不存在 continue-on-error 之类的兜底。
+      - name: Run concurrency scenarios
+        run: pnpm --filter @julai/concurrency start
+        timeout-minutes: 15
+        env:
+          CONCURRENCY_PORT: '3032'

@@ -1,5 +1,7 @@
 # julai-case-study
 
+[![CI](https://github.com/JohnYuBabe/julai-case-study/actions/workflows/ci.yml/badge.svg)](https://github.com/JohnYuBabe/julai-case-study/actions/workflows/ci.yml)
+
 A runnable slice of three engineering decisions from a real product: oversell prevention, derived event status, and a single source of truth for UI state.
 
 > **This is a case study, not the full product.** All data is synthetic.
@@ -43,6 +45,7 @@ non-recycled ticket number stored for FIFO promotion.
 - ✅ `packages/web-demo` — Vue 3 + Vite. Event list, detail page, and a live 9-state matrix that renders whatever the server returns.
 - ✅ ADRs — three decision records under [`docs/decisions`](./docs/decisions).
 - ✅ Deployment — Docker Compose + MySQL 8 + nginx subpath, live at <https://johnyu.wancafu.com/julai/>. See [`deploy/README.md`](./deploy/README.md).
+- ✅ CI — five jobs on every push: typecheck (including the concurrency suite, which `tsx` would otherwise not type-check), shared unit tests, server tests against a real MySQL 8 service, the web build, and the five concurrency scenarios.
 
 ## Concurrency evidence
 
