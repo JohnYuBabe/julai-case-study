@@ -30,6 +30,15 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
+      // 请求体解析失败时，Nest 会把 body-parser 的原始信息（含解析器
+      // 实现细节）包成 400；对公开接口统一成固定文案。业务 400 走上面的
+      // ApiException 分支，不受影响。
+      if (status === HttpStatus.BAD_REQUEST) {
+        response
+          .status(status)
+          .json(this.body('INVALID_REQUEST', '请求格式错误'));
+        return;
+      }
       const payload = exception.getResponse();
       const message =
         typeof payload === 'string'

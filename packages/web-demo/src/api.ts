@@ -95,7 +95,13 @@ async function request<T>(
   try {
     response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   } catch {
-    throw new ApiError('连不上服务端，请确认本地 API 已启动。', 'NETWORK_ERROR', 0);
+    throw new ApiError(
+      import.meta.env.PROD
+        ? '网络异常，请稍后重试。'
+        : '连不上服务端，请确认本地 API 已启动。',
+      'NETWORK_ERROR',
+      0,
+    );
   }
 
   if (!response.ok) {

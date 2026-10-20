@@ -1,11 +1,14 @@
 import 'reflect-metadata';
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ApiExceptionFilter } from './common/api-exception.filter';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // 公开演示站：不暴露后端框架指纹。
+  app.disable('x-powered-by');
   app.setGlobalPrefix('api');
   app.useGlobalFilters(new ApiExceptionFilter());
 

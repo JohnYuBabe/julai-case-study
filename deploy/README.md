@@ -22,20 +22,26 @@ rsync -az --exclude node_modules --exclude dist --exclude .env \
 cd /opt/julai-case-study/deploy
 cp .env.example .env
 # 把两个 change-me 换成 openssl rand -hex 24 的输出；chmod 600 .env
+# 数据库密码只用十六进制字符，密码会被原样拼进 DATABASE_URL，
+# 带 @ : / # % 的密码会让 Prisma 解析失败。
 
 # 3. 构建并启动
 docker compose build server
 docker compose up -d
 
-# 4. 前端：在本地或 CI 构建后只上传 dist
-./deploy/build-web.sh
+# 4. 前端：在本地或 CI（Node 22）构建后只上传 dist
+#    在仓库根执行：
+pnpm install
+pnpm build:demo
+#    Baota 的 /var/www 属 root，先让当前用户能写目标目录：
+ssh user@host 'sudo mkdir -p /var/www/julai && sudo chown "$USER" /var/www/julai'
 rsync -az --delete packages/web-demo/dist/ user@host:/var/www/julai/
 
 # 5. nginx
 #    把 deploy/nginx-locations.conf 的内容合并进 johnyu.wancafu.com 的 443 server 块；
 #    limit_req_zone / map 放在文件顶部（http 上下文），location 放在
 #    `location / { return 404; }` 之前。然后：
-nginx -t && nginx -s reload
+sudo nginx -t && sudo nginx -s reload
 
 # 6. 验证
 curl -fsS https://johnyu.wancafu.com/julai/healthz
@@ -63,7 +69,7 @@ curl -fsS -o /dev/null -w '%{http_code}\n' https://johnyu.wancafu.com/julai/.env
 ```bash
 rsync ... ./ user@host:/opt/julai-case-study/
 cd /opt/julai-case-study/deploy && docker compose build server && docker compose up -d
-# 前端有改动时重新 build-web.sh 并 rsync dist
+# 前端有改动时在仓库根执行 pnpm build:demo，再 rsync dist
 ```
 
 `docker compose up -d` 会重建 server 容器；入口脚本先跑 `prisma migrate deploy`，

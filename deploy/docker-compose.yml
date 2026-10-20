@@ -49,7 +49,9 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.server
     container_name: julai-server
-    restart: on-failure:5
+    # 演示站要能扛过宿主重启和偶发 OOM；on-failure:5 会在重试耗尽后
+    # 永久停在 Exited，nginx 只能一直 502。
+    restart: unless-stopped
     stop_grace_period: 30s
     environment:
       NODE_ENV: production
@@ -57,7 +59,8 @@ services:
       HOST: 0.0.0.0
       DATABASE_URL: mysql://${MYSQL_USER:-julai}:${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}@mysql:3306/${MYSQL_DATABASE:-julai_case}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://johnyu.wancafu.com}
-      # 演示站：重启后重置为确定性种子数据。要保留线上改动时改成 false。
+      # 演示站：重启后重置为确定性种子数据。要保留线上改动时改成 false，
+      # 并同时执行 docker compose stop resetter，否则 6 小时后仍会清库。
       SEED_ON_START: ${SEED_ON_START:-true}
     depends_on:
       mysql:

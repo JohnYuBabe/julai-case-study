@@ -100,11 +100,15 @@ organizer) and renders the server's `ButtonView` verbatim. The **9 态矩阵** p
 fetches nine fixed fixtures and shows the actual button next to each contract
 state, so a mismatch is visible rather than hidden.
 
-For a deployment under a subpath, build with the API prefix baked in. Production builds already default to `/julai/api`, and `build:demo` pins it explicitly:
+For a deployment under a subpath, build with the prefix baked in. Production builds already default to API base `/julai/api` and asset base `/julai/`; `build:demo` pins the API prefix explicitly:
 
 ```bash
 pnpm build:demo   # VITE_API_BASE=/julai/api pnpm --filter @julai/web-demo build
 ```
+
+The asset base is absolute so the SPA fallback still works: if nginx returns
+`index.html` for a deep path, the page loads its modules from `/julai/assets/`
+instead of a relative path that would 404.
 
 The prefix must be stripped by the reverse proxy, because Nest serves `/api`,
 not `/julai/api`. The live setup uses:
